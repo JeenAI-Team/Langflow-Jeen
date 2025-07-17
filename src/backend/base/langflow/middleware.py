@@ -1,5 +1,8 @@
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from loguru import logger
+import os
 
 from langflow.services.deps import get_settings_service
 
@@ -57,3 +60,50 @@ class ContentSizeLimitMiddleware:
 
         wrapper = self.receive_wrapper(receive)
         await self.app(scope, wrapper, send)
+
+
+class OriginValidationMiddleware(BaseHTTPMiddleware):
+    """Simple middleware to validate request origins - prevents direct access"""
+    
+    def __init__(self, app):
+        super().__init__(app)
+        # Get allowed origins from environment
+        allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+        self.allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+        
+        # Paths that bypass validation
+        self.bypass_paths = ["/health", "/docs", "/openapi.json"]
+        
+        if self.allowed_origins:
+            logger.info(f"🔒 Origin validation enabled for: {self.allowed_origins}")
+        else:
+            logger.info("ℹ️ Origin validation disabled (no ALLOWED_ORIGINS set)")
+    
+    async def dispatch(self, request: Request, call_next):
+        # Skip if no origins configured (disabled mode)
+        if not self.allowed_origins:
+            return await call_next(request)
+            
+        # Skip validation for bypass paths
+        if any(request.url.path.startswith(path) for path in self.bypass_paths):
+            return await call_next(request)
+        
+        # Get origin from headers (works for both direct requests and iframes)
+        origin = request.headers.get("origin") or request.headers.get("referer", "")
+        
+        # Validate origin
+        if not self._is_origin_allowed(origin):
+            logger.warning(f"🚫 Blocked direct access from: {origin or 'unknown origin'}")
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Direct access not allowed"}
+            )
+        
+        # Origin is valid, proceed
+        return await call_next(request)
+    
+    def _is_origin_allowed(self, origin: str) -> bool:
+        """Check if origin is in allowed list"""
+        if not origin:
+            return False
+        return any(origin.startswith(allowed) for allowed in self.allowed_origins)

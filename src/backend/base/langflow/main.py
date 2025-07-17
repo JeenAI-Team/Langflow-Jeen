@@ -1,3 +1,4 @@
+
 import asyncio
 import json
 import os
@@ -8,6 +9,13 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
+
+# Load environment variables from .env if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 import anyio
 import httpx
@@ -35,7 +43,7 @@ from langflow.initial_setup.setup import (
 from langflow.interface.components import get_and_cache_all_types_dict
 from langflow.interface.utils import setup_llm_caching
 from langflow.logging.logger import configure
-from langflow.middleware import ContentSizeLimitMiddleware
+from langflow.middleware import ContentSizeLimitMiddleware, OriginValidationMiddleware
 from langflow.services.deps import (
     get_queue_service,
     get_settings_service,
@@ -287,6 +295,9 @@ def create_app():
     app.add_middleware(
         ContentSizeLimitMiddleware,
     )
+    
+    # Add origin validation middleware
+    app.add_middleware(OriginValidationMiddleware)
 
     setup_sentry(app)
     origins = ["*"]
